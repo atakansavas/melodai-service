@@ -52,26 +52,6 @@ interface SpotifyUserContext {
   currentTrack?: string;
 }
 
-interface ChatMessage {
-  role: "user" | "assistant" | "system";
-  content: string;
-  timestamp: string;
-  metadata?: {
-    spotify_context?: any;
-    user_action?: string;
-    confidence_score?: number;
-  };
-}
-
-interface ChatSessionMetadata {
-  total_messages: number;
-  first_message_at: string;
-  last_message_at: string;
-  session_duration_ms: number;
-  interaction_type: string;
-  source: string;
-}
-
 interface SpotifyContext {
   access_token?: string;
   token_expires_at?: string;
@@ -80,6 +60,12 @@ interface SpotifyContext {
   current_track?: Record<string, unknown>;
   playlists?: Array<Record<string, unknown>>;
   devices?: Array<Record<string, unknown>>;
+  // Support legacy context format
+  currentTrack?: string;
+  topArtists?: string[];
+  recentPlaylists?: string[];
+  userIntent?: string;
+  conversationMood?: string;
 }
 
 /**
@@ -115,102 +101,112 @@ async function extractSpotifyToken(request: NextRequest): Promise<string> {
 async function getUserContext(
   spotifyToken: string
 ): Promise<SpotifyUserContext> {
+  if (!spotifyToken || spotifyToken.length < 10) {
+    throw new Error("Invalid Spotify token provided");
+  }
+
   try {
     await ensureSupabaseConnection();
 
-    // Try to find user by push_token in Supabase
-    // For now, we'll create a mock user since we're migrating from QdRant
-    let userData: UserData;
+    let userData: UserData | null = null;
 
     try {
-      // Check if users collection has any data
-      const health = await supabaseHelper.healthCheck();
-      console.log(`Found ${health.stats.total_users} users in database`);
+      // First try to find user by push token
+      userData = await supabaseHelper.getUserByPushToken(spotifyToken);
 
-      // Try to find user by Spotify token (this is a simplified approach)
-      // In production, you'd want to properly validate the Spotify token
-      // and find/create the user based on Spotify profile
+      if (!userData) {
+        // Check if users collection has any data
+        const health = await supabaseHelper.healthCheck();
+        console.log(`Found ${health.stats.total_users} users in database`);
 
-      // For now, try to find any user or create a mock one
-      const users = await supabaseHelper.select<UserData>(
-        "users",
-        {},
-        { limit: 1 }
-      );
+        // Try to find any existing user or create a mock one
+        const users = await supabaseHelper.select<UserData>(
+          "users",
+          {},
+          { limit: 1 }
+        );
 
-      if (users.length > 0) {
-        userData = users[0];
-      } else {
-        // Create a mock user for demonstration
-        const mockUserData = {
-          id: uuidv4(),
-          spotify_profile: {
-            id: "mock_spotify_user",
-            display_name: "Demo User",
-            email: "demo@melodai.app",
-            country: "TR",
-            product: "premium" as const,
-            followers: 0,
-            images: [],
-            external_urls: {
-              spotify: "https://open.spotify.com/user/mock",
+        if (users.length > 0) {
+          userData = users[0];
+        } else {
+          // Create a mock user for demonstration
+          const mockUserData = {
+            id: uuidv4(),
+            spotify_profile: {
+              id: "mock_spotify_user",
+              display_name: "Demo User",
+              email: "demo@melodai.app",
+              country: "TR",
+              product: "premium" as const,
+              followers: 0,
+              images: [],
+              external_urls: {
+                spotify: "https://open.spotify.com/user/mock",
+              },
             },
-          },
-          app_metadata: {
+            app_metadata: {
+              created_at: new Date().toISOString(),
+              last_login: new Date().toISOString(),
+              last_activity: new Date().toISOString(),
+              language_preference: "tr",
+              timezone: "Europe/Istanbul",
+              total_sessions: 1,
+              total_api_calls: 1,
+              app_version: "1.0.0",
+              platform: "web",
+            },
+            device_info: {
+              push_token: spotifyToken,
+              device_id: "web_device_" + Date.now(),
+              device_type: "web",
+              os_version: "Unknown",
+              app_version: "1.0.0",
+              notifications_enabled: true,
+            },
+            preferences: {
+              preferred_genres: ["pop", "rock", "electronic"],
+              listening_habits: {},
+              interaction_patterns: {},
+              privacy_settings: {},
+              notification_preferences: {
+                new_music: true,
+                playlist_updates: true,
+                recommendations: true,
+                system_updates: true,
+                marketing: false,
+              },
+            },
+            subscription: {
+              type: "premium" as const,
+              features_enabled: [
+                "basic_discovery",
+                "playlist_creation",
+                "premium_features",
+              ],
+            },
             created_at: new Date().toISOString(),
-            last_login: new Date().toISOString(),
-            last_activity: new Date().toISOString(),
-            language_preference: "tr",
-            timezone: "Europe/Istanbul",
-            total_sessions: 1,
-            total_api_calls: 1,
-            app_version: "1.0.0",
-            platform: "web",
-          },
-          device_info: {
-            push_token: spotifyToken,
-            device_id: "web_device_" + Date.now(),
-            device_type: "web",
-            os_version: "Unknown",
-            app_version: "1.0.0",
-            notifications_enabled: true,
-          },
-          preferences: {
-            preferred_genres: ["pop", "rock", "electronic"],
-            listening_habits: {},
-            interaction_patterns: {},
-            privacy_settings: {},
-            notification_preferences: {
-              new_music: true,
-              playlist_updates: true,
-              recommendations: true,
-              system_updates: true,
-              marketing: false,
-            },
-          },
-          subscription: {
-            type: "premium" as const,
-            features_enabled: [
-              "basic_discovery",
-              "playlist_creation",
-              "premium_features",
-            ],
-          },
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+            updated_at: new Date().toISOString(),
+          };
 
-        // Store the mock user in Supabase
-        try {
-          userData = await supabaseHelper.createUser(mockUserData);
-        } catch (error) {
-          console.log("Warning: Could not store mock user in Supabase:", error);
-          userData = mockUserData as UserData;
+          // Store the mock user in Supabase
+          try {
+            userData = await supabaseHelper.createUser(mockUserData);
+          } catch (error) {
+            console.log(
+              "Warning: Could not store mock user in Supabase:",
+              error
+            );
+            userData = mockUserData as UserData;
+          }
         }
       }
     } catch (error) {
       console.error("Error accessing Supabase:", error);
       throw new Error("Database connection failed");
+    }
+
+    if (!userData) {
+      throw new Error("Failed to retrieve or create user data");
     }
 
     return {
@@ -236,41 +232,62 @@ async function getOrCreateChatSession(
   sessionId?: string,
   userIntent?: string
 ): Promise<{ session: ChatSessionData; isNewSession: boolean }> {
+  if (!userId || userId.trim().length === 0) {
+    throw new Error("Valid user ID is required");
+  }
+
   await ensureSupabaseConnection();
 
   if (sessionId) {
-    // Try to find existing session
-    const session = await supabaseHelper.getChatSession(sessionId);
+    try {
+      // Try to find existing session with security check
+      const session = await supabaseHelper.getChatSession(sessionId);
 
-    if (session && session.user_id === userId) {
-      return { session, isNewSession: false };
+      if (session && session.user_id === userId) {
+        // Validate session data integrity
+        if (!session.messages || !Array.isArray(session.messages)) {
+          console.warn(
+            `Session ${sessionId} has invalid messages, reinitializing`
+          );
+          session.messages = [];
+        }
+        return { session, isNewSession: false };
+      }
+    } catch (error) {
+      console.error(`Failed to retrieve session ${sessionId}:`, error);
+      // Continue to create new session
     }
   }
 
-  // Create new session
-  const now = new Date().toISOString();
-  const sessionData = await supabaseHelper.createChatSession(userId);
+  try {
+    // Create new session with proper validation
+    const now = new Date().toISOString();
+    const sessionData = await supabaseHelper.createChatSession(userId);
 
-  // Update with additional metadata
-  const updatedSession = await supabaseHelper.updateChatSession(
-    sessionData.id,
-    {
-      session_metadata: {
-        total_messages: 0,
-        first_message_at: now,
-        last_message_at: now,
-        session_duration_ms: 0,
-        interaction_type: "general",
-        source: "api",
-      },
-      spotify_context: {
-        user_country: "TR",
-        user_product: "premium",
-      },
-    }
-  );
+    // Update with additional metadata
+    const updatedSession = await supabaseHelper.updateChatSession(
+      sessionData.id,
+      {
+        session_metadata: {
+          total_messages: 0,
+          first_message_at: now,
+          last_message_at: now,
+          session_duration_ms: 0,
+          interaction_type: userIntent || "general",
+          source: "api",
+        },
+        spotify_context: {
+          user_country: "TR",
+          user_product: "premium",
+        },
+      }
+    );
 
-  return { session: updatedSession, isNewSession: true };
+    return { session: updatedSession, isNewSession: true };
+  } catch (error) {
+    console.error("Failed to create chat session:", error);
+    throw new Error("Unable to initialize chat session");
+  }
 }
 
 /**
@@ -280,8 +297,31 @@ async function addMessageToSession(
   sessionId: string,
   message: MessageData
 ): Promise<void> {
+  // Validate inputs
+  if (!sessionId || sessionId.trim().length === 0) {
+    throw new Error("Valid session ID is required");
+  }
+
+  if (!message || !message.content || message.content.trim().length === 0) {
+    throw new Error("Valid message content is required");
+  }
+
+  if (
+    !message.role ||
+    !["user", "assistant", "system"].includes(message.role)
+  ) {
+    throw new Error("Valid message role is required");
+  }
+
   try {
-    await supabaseHelper.addMessageToSession(sessionId, message);
+    // Sanitize message content (basic XSS prevention)
+    const sanitizedMessage = {
+      ...message,
+      content: message.content.slice(0, 10000), // Limit message length
+      timestamp: message.timestamp || new Date().toISOString(),
+    };
+
+    await supabaseHelper.addMessageToSession(sessionId, sanitizedMessage);
   } catch (error) {
     console.error("Error adding message to session:", error);
     throw new Error("Failed to save message");
@@ -317,7 +357,7 @@ function buildContextualPrompt(
 - Şu anda çalan: ${
       spotifyContext.current_track
         ? JSON.stringify(spotifyContext.current_track)
-        : "Hiçbir şey"
+        : spotifyContext.currentTrack || "Hiçbir şey"
     }
 - Kullanıcı türü: ${spotifyContext.user_product || "Bilinmiyor"}`;
   }
@@ -390,13 +430,11 @@ async function processSuccessfulInteraction(
 }
 
 /**
- * POST /api/chat - Handle chat requests
+ * POST /api/v1/chat - Handle chat requests
  */
 export async function POST(req: NextRequest) {
   const requestId = uuidv4();
   const startTime = Date.now();
-
-  // Circuit breakers will be initialized automatically when used
 
   try {
     // Validate request body
@@ -417,7 +455,7 @@ export async function POST(req: NextRequest) {
 
     const { message, sessionId, context } = validation.data;
     const userIntent = context?.userIntent;
-    const spotifyContext = context; // Use context as spotify context for now
+    const spotifyContext = context as SpotifyContext;
 
     // Extract Spotify token
     let spotifyToken: string;
@@ -508,20 +546,15 @@ export async function POST(req: NextRequest) {
       { role: "user", content: message },
     ];
 
-    // Stream response from OpenAI with circuit breaker
+    // Stream response from OpenAI
     let fullResponse = "";
     try {
-      const result = await errorHandler.withCircuitBreaker(
-        "openai-chat",
-        () =>
-          streamText({
-            model: openai("gpt-4-turbo"),
-            messages: messages as any,
-            temperature: 0.7,
-            maxTokens: 800,
-          }),
-        { failureThreshold: 5, resetTimeout: 60000 }
-      );
+      const result = await streamText({
+        model: openai("gpt-4-turbo"),
+        messages: messages as any,
+        temperature: 0.7,
+        maxTokens: 800,
+      });
 
       // Process the streaming response
       const encoder = new TextEncoder();
@@ -604,7 +637,7 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * GET /api/chat - Health check and system status
+ * GET /api/v1/chat - Health check and system status
  */
 export async function GET() {
   const startTime = Date.now();

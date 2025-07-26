@@ -180,7 +180,7 @@ export class SupabaseHelper {
 
   // User-specific operations
   async createUser(userData: UserInsert): Promise<UserData> {
-    return this.insert<UserData>("users", userData);
+    return this.insert<UserData>("users", userData as any);
   }
 
   async getUserById(id: string): Promise<UserData | null> {
