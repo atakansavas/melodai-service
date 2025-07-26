@@ -18,52 +18,57 @@ class AuthManager {
 
   constructor(config: AuthConfig = {}) {
     this.config = {
-      tokenKey: 'auth_token',
-      refreshTokenKey: 'refresh_token',
-      baseURL: process.env.NEXT_PUBLIC_API_URL || '',
-      ...config
+      tokenKey: "auth_token",
+      refreshTokenKey: "refresh_token",
+      baseURL: process.env.NEXT_PUBLIC_API_URL || "",
+      ...config,
     };
   }
 
   getToken(): string | null {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === "undefined") return null;
     return localStorage.getItem(this.config.tokenKey!);
   }
 
   getRefreshToken(): string | null {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === "undefined") return null;
     return localStorage.getItem(this.config.refreshTokenKey!);
   }
 
   setToken(token: string, expiresIn?: number): void {
-    if (typeof window === 'undefined') return;
-    
+    if (typeof window === "undefined") return;
+
     localStorage.setItem(this.config.tokenKey!, token);
-    
+
     if (expiresIn) {
-      const expiresAt = Date.now() + (expiresIn * 1000);
-      localStorage.setItem(`${this.config.tokenKey}_expires_at`, expiresAt.toString());
+      const expiresAt = Date.now() + expiresIn * 1000;
+      localStorage.setItem(
+        `${this.config.tokenKey}_expires_at`,
+        expiresAt.toString()
+      );
     }
   }
 
   setRefreshToken(refreshToken: string): void {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
     localStorage.setItem(this.config.refreshTokenKey!, refreshToken);
   }
 
   clearTokens(): void {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
     localStorage.removeItem(this.config.tokenKey!);
     localStorage.removeItem(this.config.refreshTokenKey!);
     localStorage.removeItem(`${this.config.tokenKey}_expires_at`);
   }
 
   isTokenExpired(): boolean {
-    if (typeof window === 'undefined') return true;
-    
-    const expiresAtStr = localStorage.getItem(`${this.config.tokenKey}_expires_at`);
+    if (typeof window === "undefined") return true;
+
+    const expiresAtStr = localStorage.getItem(
+      `${this.config.tokenKey}_expires_at`
+    );
     if (!expiresAtStr) return false;
-    
+
     const expiresAt = parseInt(expiresAtStr);
     return Date.now() >= expiresAt - 60000; // Refresh 1 minute before expiry
   }
@@ -75,39 +80,41 @@ class AuthManager {
 
     const refreshToken = this.getRefreshToken();
     if (!refreshToken) {
-      throw new Error('No refresh token available');
+      throw new Error("No refresh token available");
     }
 
     this.refreshPromise = fetch(`${this.config.baseURL}/auth/refresh`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error('Failed to refresh token');
+          throw new Error("Failed to refresh token");
         }
         const data = await response.json();
         const authToken: AuthToken = {
           access_token: data.access_token,
           refresh_token: data.refresh_token,
-          expires_at: data.expires_in ? Date.now() + (data.expires_in * 1000) : undefined,
+          expires_at: data.expires_in
+            ? Date.now() + data.expires_in * 1000
+            : undefined,
         };
-        
+
         this.setToken(authToken.access_token, data.expires_in);
         if (authToken.refresh_token) {
           this.setRefreshToken(authToken.refresh_token);
         }
-        
+
         if (this.config.onTokenRefresh) {
           this.config.onTokenRefresh(authToken);
         }
-        
+
         return authToken;
       })
-      .catch(() => {
+      .catch((error) => {
         this.clearTokens();
         if (this.config.onAuthError) {
           this.config.onAuthError(error);
@@ -137,15 +144,18 @@ class AuthManager {
     return token;
   }
 
-  async authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  async authenticatedFetch(
+    url: string,
+    options: RequestInit = {}
+  ): Promise<Response> {
     const token = await this.getValidToken();
-    
+
     if (!token) {
-      throw new Error('No valid authentication token');
+      throw new Error("No valid authentication token");
     }
 
     const headers = new Headers(options.headers);
-    headers.set('Authorization', `Bearer ${token}`);
+    headers.set("Authorization", `Bearer ${token}`);
 
     return fetch(url, {
       ...options,
@@ -160,14 +170,16 @@ export const configureAuth = (config: AuthConfig) => {
   Object.assign(authManager, new AuthManager(config));
 };
 
-export const tokenInterceptor = async (config: RequestInit): Promise<RequestInit> => {
+export const tokenInterceptor = async (
+  config: RequestInit
+): Promise<RequestInit> => {
   const token = await authManager.getValidToken();
-  
+
   if (token) {
     const headers = new Headers(config.headers);
-    headers.set('Authorization', `Bearer ${token}`);
+    headers.set("Authorization", `Bearer ${token}`);
     config.headers = headers;
   }
-  
+
   return config;
 };

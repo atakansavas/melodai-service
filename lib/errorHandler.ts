@@ -1,4 +1,3 @@
-
 export interface RetryOptions {
   maxAttempts?: number;
   initialDelay?: number;
@@ -18,7 +17,7 @@ export interface CircuitBreakerOptions {
 }
 
 export interface ErrorNotification {
-  level: 'info' | 'warning' | 'error' | 'critical';
+  level: "info" | "warning" | "error" | "critical";
   message: string;
   error?: Error;
   context?: Record<string, unknown>;
@@ -32,18 +31,16 @@ class RetryHandler {
     maxDelay: 10000,
     backoffMultiplier: 2,
     retryCondition: (error) => {
-      if (error.status) {
-        return error.status >= 500 || error.status === 429;
+      if (error && typeof error === "object" && "status" in error) {
+        const statusError = error as { status: number };
+        return statusError.status >= 500 || statusError.status === 429;
       }
       return true;
     },
     onRetry: () => {},
   };
 
-  async retry<T>(
-    fn: () => Promise<T>,
-    options: RetryOptions = {}
-  ): Promise<T> {
+  async retry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
     const opts = { ...this.defaultOptions, ...options };
     let lastError: unknown;
     let delay = opts.initialDelay;
@@ -60,7 +57,7 @@ class RetryHandler {
 
         opts.onRetry(error, attempt);
 
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
         delay = Math.min(delay * opts.backoffMultiplier, opts.maxDelay);
       }
     }
@@ -70,9 +67,9 @@ class RetryHandler {
 }
 
 enum CircuitState {
-  CLOSED = 'CLOSED',
-  OPEN = 'OPEN',
-  HALF_OPEN = 'HALF_OPEN',
+  CLOSED = "CLOSED",
+  OPEN = "OPEN",
+  HALF_OPEN = "HALF_OPEN",
 }
 
 class CircuitBreaker {
@@ -100,7 +97,7 @@ class CircuitBreaker {
         this.state = CircuitState.HALF_OPEN;
         this.options.onHalfOpen();
       } else {
-        throw new Error('Circuit breaker is OPEN');
+        throw new Error("Circuit breaker is OPEN");
       }
     }
 
@@ -135,7 +132,10 @@ class CircuitBreaker {
     this.lastFailureTime = Date.now();
     this.successCount = 0;
 
-    if (this.failures >= this.options.failureThreshold && this.state !== CircuitState.OPEN) {
+    if (
+      this.failures >= this.options.failureThreshold &&
+      this.state !== CircuitState.OPEN
+    ) {
       this.state = CircuitState.OPEN;
       this.options.onOpen(this.failures);
     }
@@ -157,43 +157,50 @@ class ErrorLogger {
   private notifications: ErrorNotification[] = [];
   private listeners: ((notification: ErrorNotification) => void)[] = [];
 
-  log(notification: Omit<ErrorNotification, 'timestamp'>): void {
+  log(notification: Omit<ErrorNotification, "timestamp">): void {
     const fullNotification: ErrorNotification = {
       ...notification,
       timestamp: new Date(),
     };
 
     this.notifications.push(fullNotification);
-    
+
     // Keep only last 1000 notifications
     if (this.notifications.length > 1000) {
       this.notifications.shift();
     }
 
     // Notify listeners
-    this.listeners.forEach(listener => listener(fullNotification));
+    this.listeners.forEach((listener) => listener(fullNotification));
 
     // Console output
-    const consoleMethod = notification.level === 'error' || notification.level === 'critical' 
-      ? 'error' 
-      : notification.level === 'warning' ? 'warn' : 'log';
-    
-    console[consoleMethod](`[${notification.level.toUpperCase()}]`, notification.message, {
-      error: notification.error,
-      context: notification.context,
-    });
+    const consoleMethod =
+      notification.level === "error" || notification.level === "critical"
+        ? "error"
+        : notification.level === "warning"
+        ? "warn"
+        : "log";
+
+    console[consoleMethod](
+      `[${notification.level.toUpperCase()}]`,
+      notification.message,
+      {
+        error: notification.error,
+        context: notification.context,
+      }
+    );
   }
 
   subscribe(listener: (notification: ErrorNotification) => void): () => void {
     this.listeners.push(listener);
     return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
+      this.listeners = this.listeners.filter((l) => l !== listener);
     };
   }
 
-  getNotifications(level?: ErrorNotification['level']): ErrorNotification[] {
+  getNotifications(level?: ErrorNotification["level"]): ErrorNotification[] {
     if (level) {
-      return this.notifications.filter(n => n.level === level);
+      return this.notifications.filter((n) => n.level === level);
     }
     return [...this.notifications];
   }
@@ -209,10 +216,7 @@ export class ErrorHandler {
   private errorLogger = new ErrorLogger();
   private fallbacks = new Map<string, () => unknown>();
 
-  async withRetry<T>(
-    fn: () => Promise<T>,
-    options?: RetryOptions
-  ): Promise<T> {
+  async withRetry<T>(fn: () => Promise<T>, options?: RetryOptions): Promise<T> {
     return this.retryHandler.retry(fn, options);
   }
 
@@ -226,19 +230,24 @@ export class ErrorHandler {
     }
 
     const breaker = this.circuitBreakers.get(name)!;
-    
+
     try {
       return await breaker.execute(fn);
     } catch (error) {
-      if (error.message === 'Circuit breaker is OPEN') {
+      if (
+        error &&
+        typeof error === "object" &&
+        "message" in error &&
+        error.message === "Circuit breaker is OPEN"
+      ) {
         const fallback = this.fallbacks.get(name);
         if (fallback) {
           this.errorLogger.log({
-            level: 'warning',
+            level: "warning",
             message: `Circuit breaker ${name} is open, using fallback`,
             context: { service: name },
           });
-          return fallback();
+          return fallback() as T;
         }
       }
       throw error;
@@ -250,7 +259,7 @@ export class ErrorHandler {
   }
 
   logError(
-    level: ErrorNotification['level'],
+    level: ErrorNotification["level"],
     message: string,
     error?: Error,
     context?: Record<string, unknown>
@@ -258,7 +267,9 @@ export class ErrorHandler {
     this.errorLogger.log({ level, message, error, context });
   }
 
-  subscribeToErrors(listener: (notification: ErrorNotification) => void): () => void {
+  subscribeToErrors(
+    listener: (notification: ErrorNotification) => void
+  ): () => void {
     return this.errorLogger.subscribe(listener);
   }
 
@@ -298,13 +309,22 @@ export class ErrorHandler {
 
       return await operation();
     } catch (error) {
-      this.logError('error', `Operation ${name} failed`, error, { service: name });
-      
+      this.logError(
+        "error",
+        `Operation ${name} failed`,
+        error instanceof Error ? error : undefined,
+        {
+          service: name,
+        }
+      );
+
       if (fallback) {
-        this.logError('info', `Using fallback for ${name}`, undefined, { service: name });
+        this.logError("info", `Using fallback for ${name}`, undefined, {
+          service: name,
+        });
         return fallback();
       }
-      
+
       throw error;
     }
   }

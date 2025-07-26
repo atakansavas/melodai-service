@@ -90,7 +90,7 @@ function ProtectedPage() {
             </div>
           )}
 
-          {data && (
+          {data !== null && (
             <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded">
               <pre className="text-sm overflow-auto">
                 {JSON.stringify(data, null, 2)}

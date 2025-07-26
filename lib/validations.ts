@@ -8,9 +8,6 @@
 import { z } from "zod";
 
 // Common validation schemas
-export const mongoIdSchema = z
-  .string()
-  .regex(/^[a-f\d]{24}$/i, "Invalid MongoDB ObjectId");
 export const uuidSchema = z.string().uuid("Invalid UUID format");
 export const timestampSchema = z.string().datetime("Invalid timestamp format");
 export const emailSchema = z
@@ -26,44 +23,44 @@ export const urlSchema = z.string().url("Invalid URL format");
 // User token validation schemas
 export const createUserTokenSchema = z.object({
   // Device Information
-  expoPushToken: z
-    .string()
-    .min(1, "Push token is required")
-    .max(200, "Push token is too long")
-    .optional(),
+  deviceInfo: z.object({
+    pushToken: z
+      .string()
+      .min(0, "Push token is required")
+      .max(200, "Push token is too long")
+      .optional(),
 
-  deviceId: z
-    .string()
-    .min(1, "Device ID is required")
-    .max(100, "Device ID is too long"),
+    deviceId: z
+      .string()
+      .min(1, "Device ID is required")
+      .max(100, "Device ID is too long"),
 
-  platform: z.enum(["ios", "android", "web"], {
-    errorMap: () => ({ message: "Platform must be ios, android, or web" }),
+    platform: z.string().min(1, "Platform is required"),
+
+    deviceName: z
+      .string()
+      .min(1, "Device name is required")
+      .max(100, "Device name is too long")
+      .trim(),
+
+    osVersion: z
+      .string()
+      .min(1, "OS version is required")
+      .max(50, "OS version is too long")
+      .trim(),
+
+    appVersion: z
+      .string()
+      .min(1, "App version is required")
+      .max(20, "App version is too long")
+      .trim(),
+
+    currentLanguage: z
+      .string()
+      .min(2, "Language code must be at least 2 characters")
+      .max(5, "Language code cannot exceed 5 characters")
+      .default("en"),
   }),
-
-  deviceName: z
-    .string()
-    .min(1, "Device name is required")
-    .max(100, "Device name is too long")
-    .trim(),
-
-  osVersion: z
-    .string()
-    .min(1, "OS version is required")
-    .max(50, "OS version is too long")
-    .trim(),
-
-  appVersion: z
-    .string()
-    .min(1, "App version is required")
-    .max(20, "App version is too long")
-    .trim(),
-
-  currentLanguage: z
-    .string()
-    .min(2, "Language code must be at least 2 characters")
-    .max(5, "Language code cannot exceed 5 characters")
-    .default("en"),
 
   // Spotify Profile (for full user creation)
   spotifyProfile: z
@@ -271,7 +268,7 @@ export const healthCheckSchema = z.object({
       status: z.enum(["up", "down"]),
       response_time_ms: z.number().optional(),
     }),
-    qdrant: z
+    supabase: z
       .object({
         status: z.enum(["up", "down"]),
         response_time_ms: z.number().optional(),
@@ -281,6 +278,35 @@ export const healthCheckSchema = z.object({
   version: z.string(),
 });
 
+// Chat API request/response schemas
+export const chatRequestSchema = z.object({
+  message: z
+    .string()
+    .min(1, "Message is required")
+    .max(10000, "Message too long"),
+  sessionId: z.string().uuid().optional(),
+  context: z
+    .object({
+      currentTrack: z.string().optional(),
+      topArtists: z.array(z.string()).optional(),
+      recentPlaylists: z.array(z.string()).optional(),
+      userIntent: z.string().optional(),
+      conversationMood: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const chatResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    reply: z.string(),
+    sessionId: z.string().uuid(),
+    responseTime: z.number(),
+    tokensUsed: z.number().optional(),
+  }),
+  timestamp: timestampSchema.default(() => new Date().toISOString()),
+});
+
 // Export type inference helpers
 export type CreateUserTokenInput = z.infer<typeof createUserTokenSchema>;
 export type UpdateUserLanguageInput = z.infer<typeof updateUserLanguageSchema>;
@@ -288,6 +314,8 @@ export type UserRegistrationInput = z.infer<typeof userRegistrationSchema>;
 export type CreateChatSessionInput = z.infer<typeof createChatSessionSchema>;
 export type AddChatMessageInput = z.infer<typeof addChatMessageSchema>;
 export type EndChatSessionInput = z.infer<typeof endChatSessionSchema>;
+export type ChatRequestInput = z.infer<typeof chatRequestSchema>;
+export type ChatResponseOutput = z.infer<typeof chatResponseSchema>;
 export type PaginationQuery = z.infer<typeof paginationSchema>;
 export type UserQuery = z.infer<typeof userQuerySchema>;
 export type ChatSessionQuery = z.infer<typeof chatSessionQuerySchema>;
