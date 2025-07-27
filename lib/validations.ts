@@ -285,15 +285,7 @@ export const chatRequestSchema = z.object({
     .min(1, "Message is required")
     .max(10000, "Message too long"),
   sessionId: z.string().uuid().optional(),
-  context: z
-    .object({
-      currentTrack: z.string().optional(),
-      topArtists: z.array(z.string()).optional(),
-      recentPlaylists: z.array(z.string()).optional(),
-      userIntent: z.string().optional(),
-      conversationMood: z.string().optional(),
-    })
-    .optional(),
+  context: z.record(z.any()).optional(), // Dynamic key-value pairs
 });
 
 export const chatResponseSchema = z.object({
@@ -302,6 +294,7 @@ export const chatResponseSchema = z.object({
     reply: z.string(),
     sessionId: z.string().uuid(),
     responseTime: z.number(),
+    contextUsed: z.array(z.string()).optional(),
     tokensUsed: z.number().optional(),
   }),
   timestamp: timestampSchema.default(() => new Date().toISOString()),

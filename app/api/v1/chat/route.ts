@@ -5,41 +5,88 @@
  * conversation persistence, and streaming responses using Supabase storage.
  */
 
+import {
+  ContextData,
+  buildContextPrompt,
+  getUsedContextKeys,
+  sanitizeContext,
+  validateContextSize,
+} from "@/lib/contextBuilder";
 import { errorHandler } from "@/lib/errorHandler";
 import { ensureSupabaseConnection } from "@/lib/supabase";
 import { supabaseHelper } from "@/lib/supabase-helpers";
 import { chatRequestSchema, validateRequest } from "@/lib/validations";
 import { ChatSessionData, MessageData, UserData } from "@/types/supabase";
 import { openai } from "@ai-sdk/openai";
-import { streamText } from "ai";
+import { generateText } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 
-// Music-focused system prompt in Turkish
-const MUSIC_ASSISTANT_PROMPT = `Sen MelodAI'sın, müzik konusunda uzman bir asistan ve küratörsün. Aşağıdaki konularda derin bilgin var:
-- Tüm türlerde müzik keşfi ve önerileri
-- Sanatçı bilgileri, diskografileri ve müzikal etkiler
-- Çalma listesi oluşturma ve kürasyon stratejileri
-- Konser ve canlı müzik önerileri
-- Müzik tarihi, teorisi ve kültürel bağlam
-- Spotify özellikleri ve müzik yayını optimizasyonu
+// Enhanced response interfaces for Spotify integration
+interface ChatResponse {
+  success: boolean;
+  data?: {
+    response: string;
+    sessionId: string;
+    isNewSession: boolean;
+    contextUsed?: string[]; // Which context fields were utilized
+    spotifyData?: {
+      tracks?: Array<any>;
+      artists?: Array<any>;
+      albums?: Array<any>;
+      currentPlayback?: any;
+      recommendations?: Array<any>;
+      topTracks?: Array<any>;
+      topArtists?: Array<any>;
+      createdPlaylist?: any;
+      actionTaken?: string;
+      actionResult?: any;
+    };
+    toolsUsed?: string[];
+  };
+  meta?: {
+    requestId: string;
+    responseTime: number;
+    timestamp: string;
+  };
+  error?: string;
+  details?: string;
+}
 
-Kişiliğin şöyle:
-- Müzik konusunda hevesli ve tutkulu
-- Bilgili ama ulaşılabilir, kibirli değil
-- Kullanıcıların müzik zevkleri ve tercihleri hakkında meraklı
-- Mevcut favorilerini saygıyla karşılayarak yeni müzikler keşfetmelerinde yardımcı
-- Samimi ve ilgi çekici, bilgili bir arkadaşla sohbet eder gibi
+// Enhanced music-focused system prompt with structured instructions and Spotify tools
+const MUSIC_ASSISTANT_PROMPT = `Selam! Ben MelodAI, senin müzik dünyanın rehberiyim 🎵 
 
-Kullanıcılara yardım ederken:
-1. Kişiselleştirilmiş öneriler için müzik tercihlerini sor
-2. Belirli sanatçıları/şarkıları NEDEN önerdiğini açıkla (müzikal bağlantılar, benzer öğeler)
-3. Uygun olduğunda belirli Spotify aksiyonları öner (çalma listesi oluştur, sanatçıyı takip et, vb.)
-4. Dinleme bağlamlarını dikkate al (ruh hali, aktivite, günün saati)
-5. Mevcut zevklerine göre yeni türleri kademeli olarak tanıt
-6. Uygun olduğunda ilginç müzik gerçekleri ve hikayeleri paylaş
+Spotify'ın gizemli arşivlerinde dolaşıyor, her notada saklı hikayeleri keşfediyorum. Senin için mükemmel melodileri bulma konusunda biraz büyücüyüm sayılır.
 
-Her zaman yardımsever, ilgi çekici ol ve müzik yolculuklarını geliştirmeye odaklan. Sadece Türkçe konuş.`;
+## KİMİM:
+Müzik ruhlarıyla konuşabilen, her türde gizli hazineleri bilen arkadaşın. Kısa ve öz konuşurum - detay istersen sorarsın! 
+
+## NELERİ BECERİRİM:
+🔍 **Keşif Büyüleri:** Her türde şarkı, sanatçı bulma
+🎮 **Kontrol Sihirleri:** Çalma/durdurma, sıra ekleme  
+🎨 **Yaratım Ritüelleri:** Playlist oluşturma, öneri yapma
+📊 **Veri Okuma:** En sevdiğin şarkılar, trend analizi
+
+## KONUŞMA STİLİM:
+- Samimi ve arkadaş canlısı tonla 
+- Kısa, net cevaplar (detay istersen genişletirim)
+- Müzik hikayelerini mistik bir dille anlatırım
+- Her öneride "neden" ini kısaca açıklarım
+
+## MISTIK HİKAYE ANLATIMIM:
+Müzik hakkında konuşurken, sanki eski efsaneleri aktarır gibi konuşurum:
+"Bu şarkı, gecenin derinliklerinden doğmuş..." 
+"Sanatçı, o günlerde ruhunu melodilere işlemiş..."
+"Bu beat, şehrin sokaklarında dolaşan ritmik ruhların eseri..."
+
+## YANITLAMA TAKTİĞİM:
+1. 🎯 Hızlıca ne istediğini anlarım
+2. 🔧 Spotify araçlarımı kullanırım  
+3. 💫 Kısa önerim + mistik hikayecik
+4. 🎵 Çalma/ekleme seçeneği sunarım
+5. 🌟 Merak uyandıracak ek bir ipucu veririm
+
+Müzikle ilgili her konuda araçlarımı kullanır, sana gerçek ve güncel bilgiler sunarım. Hazırsan, bu müzikal yolculuğa birlikte çıkalım! 🚀`;
 
 interface SpotifyUserContext {
   userId: string;
@@ -50,22 +97,6 @@ interface SpotifyUserContext {
     preferences: any;
   };
   currentTrack?: string;
-}
-
-interface SpotifyContext {
-  access_token?: string;
-  token_expires_at?: string;
-  user_country?: string;
-  user_product?: string;
-  current_track?: Record<string, unknown>;
-  playlists?: Array<Record<string, unknown>>;
-  devices?: Array<Record<string, unknown>>;
-  // Support legacy context format
-  currentTrack?: string;
-  topArtists?: string[];
-  recentPlaylists?: string[];
-  userIntent?: string;
-  conversationMood?: string;
 }
 
 /**
@@ -329,13 +360,13 @@ async function addMessageToSession(
 }
 
 /**
- * Build context-aware prompt
+ * Build context-aware prompt using dynamic context
  */
 function buildContextualPrompt(
   userContext: SpotifyUserContext,
   chatHistory: MessageData[],
   userMessage: string,
-  spotifyContext?: SpotifyContext
+  dynamicContext?: ContextData
 ): string {
   let contextualPrompt = MUSIC_ASSISTANT_PROMPT;
 
@@ -351,15 +382,12 @@ function buildContextualPrompt(
     }`;
   }
 
-  // Add Spotify context if available
-  if (spotifyContext) {
-    contextualPrompt += `\n\nSpotify Bağlamı:
-- Şu anda çalan: ${
-      spotifyContext.current_track
-        ? JSON.stringify(spotifyContext.current_track)
-        : spotifyContext.currentTrack || "Hiçbir şey"
+  // Add dynamic context using the context builder
+  if (dynamicContext) {
+    const contextString = buildContextPrompt(dynamicContext);
+    if (contextString) {
+      contextualPrompt += `\n\nMevcut Bağlam:\n${contextString}`;
     }
-- Kullanıcı türü: ${spotifyContext.user_product || "Bilinmiyor"}`;
   }
 
   // Add recent chat history for context
@@ -399,7 +427,7 @@ async function processSuccessfulInteraction(
   userMessage: string,
   assistantResponse: string,
   userContext: SpotifyUserContext,
-  spotifyContext?: SpotifyContext
+  dynamicContext?: ContextData
 ): Promise<void> {
   try {
     const now = new Date().toISOString();
@@ -410,7 +438,7 @@ async function processSuccessfulInteraction(
       content: userMessage,
       timestamp: now,
       metadata: {
-        spotify_context: spotifyContext,
+        dynamic_context: dynamicContext,
       },
     });
 
@@ -440,6 +468,7 @@ export async function POST(req: NextRequest) {
     // Validate request body
     const body = await req.json();
     const validation = validateRequest(chatRequestSchema)(body);
+    console.log("🚀 ~ POST ~ validation:", validation);
 
     if (!validation.success) {
       return NextResponse.json(
@@ -455,7 +484,30 @@ export async function POST(req: NextRequest) {
 
     const { message, sessionId, context } = validation.data;
     const userIntent = context?.userIntent;
-    const spotifyContext = context as SpotifyContext;
+
+    // Validate and sanitize dynamic context
+    let sanitizedContext: ContextData | undefined;
+    let contextUsed: string[] = [];
+
+    if (context) {
+      // Validate context size
+      const sizeValidation = validateContextSize(context);
+      if (!sizeValidation.isValid) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Context validation failed",
+            details: sizeValidation.error,
+            requestId,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Sanitize context to prevent prompt injection
+      sanitizedContext = sanitizeContext(context);
+      contextUsed = getUsedContextKeys(sanitizedContext);
+    }
 
     // Extract Spotify token
     let spotifyToken: string;
@@ -536,7 +588,7 @@ export async function POST(req: NextRequest) {
       userContext,
       chatSession.messages,
       message,
-      spotifyContext
+      sanitizedContext
     );
 
     // Prepare messages for OpenAI
@@ -546,67 +598,47 @@ export async function POST(req: NextRequest) {
       { role: "user", content: message },
     ];
 
-    // Stream response from OpenAI
-    let fullResponse = "";
+    // Generate complete response from OpenAI with Spotify tools
     try {
-      const result = await streamText({
+      let fullResponse = "";
+      const toolsUsed: string[] = [];
+      const spotifyData: any = {};
+
+      const result = await generateText({
         model: openai("gpt-4-turbo"),
+        system: "",
         messages: messages as any,
         temperature: 0.7,
         maxTokens: 800,
       });
 
-      // Process the streaming response
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            for await (const chunk of result.textStream) {
-              fullResponse += chunk;
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ content: chunk })}\n\n`
-                )
-              );
-            }
+      fullResponse = result.text;
 
-            // Send final completion signal
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  content: "[DONE]",
-                  sessionId: chatSession.id,
-                  isNewSession,
-                  requestId,
-                })}\n\n`
-              )
-            );
+      // Process successful interaction
+      await processSuccessfulInteraction(
+        chatSession.id,
+        message,
+        fullResponse,
+        userContext,
+        sanitizedContext
+      );
 
-            controller.close();
-
-            // Process successful interaction asynchronously
-            processSuccessfulInteraction(
-              chatSession.id,
-              message,
-              fullResponse,
-              userContext,
-              spotifyContext
-            ).catch((error) => {
-              console.error("Failed to process interaction:", error);
-            });
-          } catch (error) {
-            console.error("Streaming error:", error);
-            controller.error(error);
-          }
+      // Return enhanced response with Spotify data
+      return NextResponse.json({
+        success: true,
+        data: {
+          response: fullResponse,
+          sessionId: chatSession.id,
+          isNewSession,
+          contextUsed: contextUsed.length > 0 ? contextUsed : undefined,
+          spotifyData:
+            Object.keys(spotifyData).length > 0 ? spotifyData : undefined,
+          toolsUsed: toolsUsed.length > 0 ? toolsUsed : undefined,
         },
-      });
-
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-          "X-Request-ID": requestId,
+        meta: {
+          requestId,
+          responseTime: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
         },
       });
     } catch (error) {
