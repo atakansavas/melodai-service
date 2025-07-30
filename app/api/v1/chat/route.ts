@@ -18,7 +18,8 @@ import { supabaseHelper } from "@/lib/supabase-helpers";
 import { chatRequestSchema, validateRequest } from "@/lib/validations";
 import { ChatSessionData, MessageData, UserData } from "@/types/supabase";
 import { openai } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { experimental_createMCPClient, generateText } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 
@@ -637,15 +638,15 @@ export async function POST(req: NextRequest) {
       const toolsUsed: string[] = [];
       const spotifyData: any = {};
 
-      // const mcpClient = await experimental_createMCPClient({
-      //   transport: new StreamableHTTPClientTransport(
-      //     new URL(
-      //       "https://server.smithery.ai/@atakansavas/spotify-oauth-mcp-server/mcp?api_key=d1f73d1d-d5bf-4895-95fb-70cad14a8272&profile=deafening-termite-a8xxsR"
-      //     )
-      //   ),
-      // });
+      const mcpClient = await experimental_createMCPClient({
+        transport: new StreamableHTTPClientTransport(
+          new URL(
+            "https://server.smithery.ai/@latiftplgu/spotify-oauth-mcp-server/mcp?api_key=1f0213ba-4387-4737-9b79-5f985077af31&profile=homeless-chipmunk-5GPLja"
+          )
+        ),
+      });
 
-      // const tools = await mcpClient.tools();
+      const tools = await mcpClient.tools();
 
       const result = await generateText({
         model: openai("gpt-4-turbo"),
@@ -653,7 +654,7 @@ export async function POST(req: NextRequest) {
         messages: messages as any,
         temperature: 0.7,
         maxTokens: 800,
-        // tools: tools,
+        tools: tools,
         maxSteps: 2,
       });
 
