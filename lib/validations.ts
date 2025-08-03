@@ -285,6 +285,15 @@ export const chatRequestSchema = z.object({
     .min(1, "Message is required")
     .max(10000, "Message too long"),
   sessionId: z.string().uuid().optional(),
+  messageHistory: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system"]),
+        content: z.string().min(1, "Message content is required"),
+        timestamp: z.string().datetime().optional(),
+      })
+    )
+    .optional(),
   context: z.record(z.any()).optional(), // Dynamic key-value pairs
 });
 
